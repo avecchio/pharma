@@ -25,6 +25,14 @@ def read_phenotype_responses_from_file(phenotype_filepath):
                 return
     return phenotype_responses
 
+def extract_vcf_entry_info(unparsed_info):
+    info_dict = {}
+    info_data = unparsed_info.split(";")
+    for info_entry in info_data:
+        info_key, info_value = info_data.split("=")
+        info_dict[key] = info_value
+    return info_dict
+
 def extract_vcf_entries(vcf_filepath):
     vcf_header = None
     vcf_entries = []
@@ -41,28 +49,47 @@ def extract_vcf_entries(vcf_filepath):
     for vcf_entry in vcf_entries:
         vcf_entry_dict = {}
         for index in range(0, len(vcf_header)):
-            vcf_entry_dict[vcf_header[index]] = vcf_entry[index]
+            if vcf_header[index] == 'INFO':
+                entry_info_dict = extract_vcf_entry_info(vcf_entry[index])
+                vcf_entry_dict[vcf_header[index]] = entry_info_dict
+            else:
+                vcf_entry_dict[vcf_header[index]] = vcf_entry[index]
         vcf_data.append(vcf_entry_dict)
     return vcf_data
 
-    #    print(len(vcf_entry), len(vcf_header))
+def count_vcf_entries(variants):
+    return len(variants)
 
-                #entry_info = vcf_entry[7].split(";")
-                #ac = entry_info[0].split("=")[1]
-                #if ac.split(","):
-                #    if int(ac.split(",")[0]) > 1:
-                #        print(f'hi {ac.split(",")}')
-                #        ac_counter += 1
-                #elif int(ac) > 1:
-                #    ac_counter += 1
-                ##print(vcf_entry)
-                #counter += 1
-        #print(f'Vcf entries: {counter}')
-        #print(f'Alternate variant counts: {ac_counter}')
+def count_multiple_alternate_alleles(variants):
+    ac_counter = 0
+    for variant in variants:
+        variant_info = variant['INFO']
+        if int(variant_info['AC'].split(",")[0]) > 1
+            ac_counter += 1
+        elif int(variant_info['AC']) > 1:
+            ac_counter += 1
+    return ac_counter
 
+def count_passing_variants(variants):
+    passing_variant_counter = 0
+    for variant in variants:
+        if variant['FILTER'] == 'PASS':
+            passing_variant_counter += 1
+    return passing_variant_counter
 
-#def is_reactive(subject):
-#    return phenotypes[subject] == '1'
+def count_snp_variants(variants):
+    snp_entries_counter = 0
+    for variant in variants:
+        if variant['INFO']['VT'] == 'SNP':
+            snp_entries_counter += 1
+    return snp_entries_counter
+
+def count_indel_variants(variants):
+    snp_indels_counter = 0
+    for variant in variants:
+        if variant['INFO']['VT'] == 'INDEL':
+            snp_indels_counter += 1
+    return snp_indels_counter
 
 def convert_coded_genotype_to_readable_form(genotype):
     if genotype in ['0|0', '0/0']:
@@ -152,18 +179,16 @@ def generate_manhattan_plot(
 
     plt.show()
 
-def count_phenotype_responses_foreach_variant(variants, phenotype_responses):
+def evaluate_variant_phenotype_significance(variants, phenotype_responses):
     snp_phenotype_p_values = []
     for variant in variants:
         snp_phenotype_frequencies = count_phenotype_responses_for_variant(variant, phenotype_responses)
         p_value = variant_chi_square_analysis(snp_phenotype_frequencies['genotype_freq_table'])
-        #snp_phenotype_frequencies['p_value'] = p_value
 
         snp_phenotype_p_value = snp_phenotype_frequencies.copy()
         del snp_phenotype_p_value['genotype_freq_table']
         snp_phenotype_p_value['genotype_freq_table'] = p_value
         snp_phenotype_p_values.append(snp_phenotype_p_value)
-        #frequencies.append(variant_data)
     statistical_significance_threshold = 5e-8
     record_significant_p_values(snp_phenotype_p_values, 'id', 'p_value', statistical_significance_threshold, "significant_variants.txt")
 
@@ -175,9 +200,7 @@ def count_phenotype_responses_foreach_variant(variants, phenotype_responses):
         export_path="genotype_significance.png"
     )
 
-    #return frequencies
-
 
 phenotypes = read_phenotype_responses_from_file("assignment1_phen.txt")
 vcf_data = extract_vcf_entries("assignment1_geno.vcf")
-count_phenotype_responses_foreach_variant(vcf_data, phenotypes)
+evaluate_variant_phenotype_significance(vcf_data, phenotypes)
