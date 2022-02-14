@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
+import math
 
 from scipy.stats import chi2_contingency
 
@@ -29,8 +30,13 @@ def extract_vcf_entry_info(unparsed_info):
     info_dict = {}
     info_data = unparsed_info.split(";")
     for info_entry in info_data:
-        info_key, info_value = info_data.split("=")
-        info_dict[key] = info_value
+        try:
+            info_key, info_value = info_entry.split("=")
+            info_dict[info_key] = info_value
+        except:
+            pass
+            #print(info_data)
+            #print(info_entry)
     return info_dict
 
 def extract_vcf_entries(vcf_filepath):
@@ -64,7 +70,7 @@ def count_multiple_alternate_alleles(variants):
     ac_counter = 0
     for variant in variants:
         variant_info = variant['INFO']
-        if int(variant_info['AC'].split(",")[0]) > 1
+        if int(variant_info['AC'].split(",")[0]) > 1:
             ac_counter += 1
         elif int(variant_info['AC']) > 1:
             ac_counter += 1
@@ -94,12 +100,11 @@ def count_indel_variants(variants):
 def convert_coded_genotype_to_readable_form(genotype):
     if genotype in ['0|0', '0/0']:
         return 'AA'
-    elif genotype in ['0|1', '0/1', '1|0', '1/0']:
+    genotype_data = genotype.split("|")
+    if genotype_data[0] == '0' or genotype_data[1] == '0':
         return 'Aa'
-    elif genotype in ['1|1', '1/1']:
-        return 'aa'
     else:
-        print('Error: Malformed genotype code!')
+        return 'aa'
 
 def variant_chi_square_analysis(data_table):
     df = pd.DataFrame(data_table).transpose()
@@ -165,7 +170,7 @@ def generate_manhattan_plot(
     ax.set_xlim([0, len(data)])
     ax.set_ylim([0, data['-log10(p_value)'].max() + 1])
     ax.set_xlabel('Chromosome')
-    plt.axhline(y=significance, color='gray', linestyle='-', linewidth = 0.5)
+    plt.axhline(y=significance, color='black', linestyle='-', linewidth = 1)
     plt.xticks(fontsize=8, rotation=60)
     plt.yticks(fontsize=8)
 
@@ -187,16 +192,25 @@ def evaluate_variant_phenotype_significance(variants, phenotype_responses):
 
         snp_phenotype_p_value = snp_phenotype_frequencies.copy()
         del snp_phenotype_p_value['genotype_freq_table']
-        snp_phenotype_p_value['genotype_freq_table'] = p_value
+        snp_phenotype_p_value['p_value'] = p_value
         snp_phenotype_p_values.append(snp_phenotype_p_value)
-    statistical_significance_threshold = 5e-8
-    record_significant_p_values(snp_phenotype_p_values, 'id', 'p_value', statistical_significance_threshold, "significant_variants.txt")
 
-    generate_manhattan_plot(
+    chromosome_key = 'CHROM'
+    p_value_key = 'p_value'
+    statistical_significance_threshold = 5e-8
+    record_significant_p_values(
         snp_phenotype_p_values,
-        chromosome_key='chromosome',
-        p_value_key='p_value',
-        significance=statistical_significance_threshold,
+        chromosome_key,
+        p_value_key,
+        statistical_significance_threshold,
+        "significant_variants.txt"
+    )
+    
+    generate_manhattan_plot(
+        pd.DataFrame(snp_phenotype_p_values),
+        chromosome_key=chromosome_key,
+        p_value_key=p_value_key,
+        significance= -math.log10(statistical_significance_threshold),
         export_path="genotype_significance.png"
     )
 
