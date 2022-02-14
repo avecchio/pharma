@@ -64,15 +64,17 @@ def extract_vcf_entries(vcf_filepath):
 #def is_reactive(subject):
 #    return phenotypes[subject] == '1'
 
-def convert_genotype(genotype):
-    if genotype == '0|0':
+def convert_coded_genotype_to_readable_form(genotype):
+    if genotype in ['0|0', '0/0']:
         return 'AA'
-    elif genotype == '0|1' or genotype == '1|0':
+    elif genotype in ['0|1', '0/1', '1|0', '1/0']:
         return 'Aa'
-    else:
+    elif genotype in ['1|1', '1/1']:
         return 'aa'
+    else:
+        print('Error: Malformed genotype code!')
 
-def chi_square_analysis(data_table):
+def variant_chi_square_analysis(data_table):
     df = pd.DataFrame(data_table).transpose()
     column_sums = list(df.sum(axis=0).values)
     # if any of the columns sums to zero
@@ -89,9 +91,8 @@ def count_phenotype_responses_for_variant(variant, phenotype_responses):
             'cases' : {'aa': 0, 'Aa': 0, 'AA': 0},
             'controls': {'aa': 0, 'Aa': 0, 'AA': 0}
         }
-        #print(variant)
         for subject in phenotype_responses:
-            allele = convert_genotype(variant[subject])
+            allele = convert_coded_genotype_to_readable_form(variant[subject])
             if phenotype_responses[subject] == '1':
                 genotype_freq_table['cases'][allele] += 1
             else:
@@ -100,48 +101,27 @@ def count_phenotype_responses_for_variant(variant, phenotype_responses):
         variant_with_genotype_freq_table = variant.copy()
         variant_with_genotype_freq_table['genotype_freq_table'] = genotype_freq_table
         return variant_with_genotype_freq_table
-        #return {
-        #    'chromosome': variant['CHROM'],
-        #    'position': variant['POS'],
-        #    'id': variant['ID'],
-        #    'data_table': data_table
-        #}
 
-
-def count_phenotype_responses_foreach_variant(variants, phenotype_responses):
-    frequencies = []
+def record_significant_p_values(variants, id_key, p_value_key, significance, output_filepath):
+    record_entries = []
     for variant in variants:
-        snp_phenotype_frequencies = count_phenotype_responses_for_variant(variant, phenotype_responses)
-        p_value = chi_square_analysis(snp_phenotype_frequencies['genotype_freq_table'])
-        snp_phenotype_frequencies['p_value'] = p_value
-        #frequencies.append(variant_data)
-    return frequencies
+        if variant[p_value_key] < significance:
+            pval = variant[p_value_key]
+            id = variant[id_key]
+            record_entries.append(f'{id} {pval}')
 
-def chi_square(frequencies):
-    p_value_data = []
-    for freq in frequencies:
-        pval = chi_square_analysis(freq['data_table'])
-        #print(pval)
-        chr = freq['chromosome']
-        pval_data = {
-            'chromosome': f'chr{chr}',
-            'position': freq['position'],
-            'id': freq['id'],
-            'p_value': pval
-        }
-        p_value_data.append(pval_data)
-    return p_value_data
+    with open(output_filepath, 'w') as f:
+        f.write('\n'.join(record_entries))
 
-def FormatData(data, chromosome = 'chr', p_value = 'p_wald'):
-    data['-log10(p_value)'] = -np.log10(data[p_value])
-    data[chromosome] = data[chromosome].astype('category')
+def generate_manhattan_plot(
+        data, chromosome_key, p_value_key, export_path = None, significance = 6,
+        colors = ['#E24E42', '#008F95'], refSNP = False
+    ):
+
+    data['-log10(p_value)'] = -np.log10(data[p_value_key])
+    data[chromosome_key] = data[chromosome_key].astype('category')
     data['ind'] = range(len(data))
-    data_grouped = data.groupby((chromosome))
-    return data, data_grouped
-
-def GenerateManhattan(pyhattan_object, export_path = None, significance = 6, colors = ['#E24E42', '#008F95'], refSNP = False):
-    data = pyhattan_object[0]
-    data_grouped = pyhattan_object[1]
+    data_grouped = data.groupby((chromosome_key))
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -172,44 +152,32 @@ def GenerateManhattan(pyhattan_object, export_path = None, significance = 6, col
 
     plt.show()
 
+def count_phenotype_responses_foreach_variant(variants, phenotype_responses):
+    snp_phenotype_p_values = []
+    for variant in variants:
+        snp_phenotype_frequencies = count_phenotype_responses_for_variant(variant, phenotype_responses)
+        p_value = variant_chi_square_analysis(snp_phenotype_frequencies['genotype_freq_table'])
+        #snp_phenotype_frequencies['p_value'] = p_value
+
+        snp_phenotype_p_value = snp_phenotype_frequencies.copy()
+        del snp_phenotype_p_value['genotype_freq_table']
+        snp_phenotype_p_value['genotype_freq_table'] = p_value
+        snp_phenotype_p_values.append(snp_phenotype_p_value)
+        #frequencies.append(variant_data)
+    statistical_significance_threshold = 5e-8
+    record_significant_p_values(snp_phenotype_p_values, 'id', 'p_value', statistical_significance_threshold, "significant_variants.txt")
+
+    generate_manhattan_plot(
+        snp_phenotype_p_values,
+        chromosome_key='chromosome',
+        p_value_key='p_value',
+        significance=statistical_significance_threshold,
+        export_path="genotype_significance.png"
+    )
+
+    #return frequencies
+
 
 phenotypes = read_phenotype_responses_from_file("assignment1_phen.txt")
 vcf_data = extract_vcf_entries("assignment1_geno.vcf")
-frequencies = count_frequencies(vcf_data, phenotypes)
-p_values = chi_square(frequencies)
-
-chr_max_mins = {}
-for p_val in p_values:
-    if p_val['chromosome'] not in chr_max_mins:
-        chr_max_mins[p_val['chromosome']] = []
-    chr_max_mins[p_val['chromosome']].append(int(p_val['position']))
-
-chr_diffs = {}
-for chr in chr_max_mins:
-    positions = chr_max_mins[chr]
-    max_pos = max(positions)
-    min_pos = min(positions)
-    chr_diffs[chr] = min_pos - 1
-
-lines = []
-for p_val in p_values:
-    if p_val['p_value'] < 5e-8:
-        pval = p_val['p_value']
-        id = p_val['id']
-        lines.append(f'{id} {pval}')
-
-with open('significant_variants.txt', 'w') as f:
-    f.write('\n'.join(lines))
-
-formatted_manhattan_data = []
-for v in p_values:
-    formatted_manhattan_data.append({
-        "#CHROM": v['chromosome'],
-        "POS": int(v['position']), # - chr_diffs[v['chromosome']],
-        "P": v['p_value'],
-        "ID": v['id']
-    })
-
-data = pd.DataFrame(formatted_manhattan_data)
-formatted_data = FormatData(data, chromosome='#CHROM', p_value='P')
-GenerateManhattan(formatted_data, export_path="manhattan.png")
+count_phenotype_responses_foreach_variant(vcf_data, phenotypes)
