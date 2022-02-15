@@ -2,12 +2,12 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
 import math
+import argparse
 
 from scipy.stats import chi2_contingency
 
-def clean_tsv_entry(tsv_line):
+def parse_tsv_entry(tsv_line):
     return tsv_line.strip().split("\t")
 
 # read all phenotype entries from text file and store in a dictionary
@@ -16,7 +16,7 @@ def read_phenotype_responses_from_file(phenotype_filepath):
     phenotype_responses = {}
     with open(phenotype_filepath) as phenotype_file:
         for line in phenotype_file.readlines()[1:]:
-            phenotype_response_entry = clean_tsv_entry(line)
+            phenotype_response_entry = parse_tsv_entry(line)
             subject_id = phenotype_response_entry[0]
             phenotype_response = phenotype_response_entry[1]
             if subject_id not in phenotype_responses:
@@ -46,10 +46,10 @@ def extract_vcf_entries(vcf_filepath):
         for line in vcf_file.readlines():
             # track the header
             if line.startswith('#CHROM'):
-                vcf_header = clean_tsv_entry(line[1:])
+                vcf_header = parse_tsv_entry(line[1:])
             # track all lines that are not commented
             elif line[0] != '#':
-                vcf_entry = clean_tsv_entry(line)
+                vcf_entry = parse_tsv_entry(line)
                 vcf_entries.append(vcf_entry)
     vcf_data = []
     for vcf_entry in vcf_entries:
@@ -98,25 +98,44 @@ def count_indel_variants(variants):
     return snp_indels_counter
 
 def convert_coded_genotype_to_readable_form(genotype):
-    if genotype in ['0|0', '0/0']:
+    if '|' not in genotype:
+        print('error')
+        print(genotype)
+        return
+    elif genotype == '0|0': #in ['0|0', '0/0']:
         return 'AA'
-    genotype_data = genotype.split("|")
-    if genotype_data[0] == '0' or genotype_data[1] == '0':
+    elif '0' in genotype: #genotype_data[0] == '0' or genotype_data[1] == '0':
         return 'Aa'
     else:
         return 'aa'
+    #genotype_data = genotype.split("|")
+    
+#import scipy.stats as stats
+from scipy.stats import chisquare
+import numpy as np
+import math
+def variant_chi_square_analysis(freq_data, observed_key, expected_key):
+    df = pd.DataFrame(freq_data).transpose()
+    observed_values = list(freq_data[observed_key].values())
+    expected_values = list(freq_data[expected_key].values())
 
-def variant_chi_square_analysis(data_table):
-    df = pd.DataFrame(data_table).transpose()
+    if 0 in expected_values or 0.0 in expected_values:
+        print(df)
+        return 0, 1
+
     column_sums = list(df.sum(axis=0).values)
     # if any of the columns sums to zero
     # return the p value as 1
     for val in column_sums:
         if val == 0:
-            return 1
-    # calculate the p value of the contingency table
-    c, p, dof, expected = chi2_contingency(df)
-    return p
+            return 0, 1
+
+    #print(observed_values, expected_values)
+    res = chisquare(observed_values, f_exp=expected_values)
+    chi_square, p_value = res
+    if math.isinf(chi_square):
+        p_value = 0.1
+    return chi_square, p_value #res[0], res[1]
 
 def count_phenotype_responses_for_variant(variant, phenotype_responses):
         genotype_freq_table = {
@@ -125,7 +144,7 @@ def count_phenotype_responses_for_variant(variant, phenotype_responses):
         }
         for subject in phenotype_responses:
             allele = convert_coded_genotype_to_readable_form(variant[subject])
-            if phenotype_responses[subject] == '1':
+            if phenotype_responses[subject] == '0':
                 genotype_freq_table['cases'][allele] += 1
             else:
                 genotype_freq_table['controls'][allele] += 1
@@ -145,10 +164,33 @@ def record_significant_p_values(variants, id_key, p_value_key, significance, out
     with open(output_filepath, 'w') as f:
         f.write('\n'.join(record_entries))
 
+def calculate_hwe(aa, Aa, AA):
+    total = aa + Aa + AA
+    p = (Aa + (AA*2)) / (total * 2)
+    q = 1 - p
+
+    expected_aa = (q * q) * total
+    expected_Aa = 2 * (p * q) * total
+    expected_AA = (p * p) * total
+
+    genotype_freq_table = {
+        'observed' : {'aa': aa, 'Aa': Aa, 'AA': AA},
+        'expected': {
+            'aa': expected_aa,
+            'Aa': expected_Aa,
+            'AA': expected_AA
+        }
+    }
+
+    chi_square, p_value = variant_chi_square_analysis(genotype_freq_table, 'observed', 'expected')
+    print(chi_square, p_value)
+
 def generate_manhattan_plot(
         data, chromosome_key, p_value_key, export_path = None, significance = 6,
         colors = ['#E24E42', '#008F95'], refSNP = False
     ):
+
+    data.to_csv('print.csv')
 
     data['-log10(p_value)'] = -np.log10(data[p_value_key])
     data[chromosome_key] = data[chromosome_key].astype('category')
@@ -188,8 +230,8 @@ def evaluate_variant_phenotype_significance(variants, phenotype_responses):
     snp_phenotype_p_values = []
     for variant in variants:
         snp_phenotype_frequencies = count_phenotype_responses_for_variant(variant, phenotype_responses)
-        p_value = variant_chi_square_analysis(snp_phenotype_frequencies['genotype_freq_table'])
-
+        chi_square, p_value = variant_chi_square_analysis(snp_phenotype_frequencies['genotype_freq_table'], 'cases', 'controls')
+        print(chi_square, p_value)
         snp_phenotype_p_value = snp_phenotype_frequencies.copy()
         del snp_phenotype_p_value['genotype_freq_table']
         snp_phenotype_p_value['p_value'] = p_value
@@ -215,6 +257,17 @@ def evaluate_variant_phenotype_significance(variants, phenotype_responses):
     )
 
 
-phenotypes = read_phenotype_responses_from_file("assignment1_phen.txt")
-vcf_data = extract_vcf_entries("assignment1_geno.vcf")
-evaluate_variant_phenotype_significance(vcf_data, phenotypes)
+if __name__ == '__main__':
+
+    #calculate_hwe(200, 400, 400)
+    #parser = argparse.ArgumentParser(description='Genotype Analysis')
+    #parser.add_argument('--phen_responses', dest='phen',
+    #                help='a two column (no header) text file containing phenotype responses')
+    #parser.add_argument('--vcf', dest='vcf',
+    #                help='a vcf file')
+
+    #args = parser.parse_args()
+    #print(args)
+    phenotypes = read_phenotype_responses_from_file("assignment1_phen.txt")
+    vcf_data = extract_vcf_entries("assignment1_geno.vcf")
+    evaluate_variant_phenotype_significance(vcf_data, phenotypes)
