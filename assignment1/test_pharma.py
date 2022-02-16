@@ -28,10 +28,10 @@ def test_chi_square_full_values():
 #test_chi_square_nonzero_columns()
 #test_chi_square_zero_sum_column()
 #test_chi_square_full_values()
-print(convert_coded_genotype_to_readable_form('0|0'))
-print(convert_coded_genotype_to_readable_form('0|1'))
-print(convert_coded_genotype_to_readable_form('1|1'))
-print(convert_coded_genotype_to_readable_form('2|0'))
-print(convert_coded_genotype_to_readable_form('0|2'))
-print(convert_coded_genotype_to_readable_form('1|2'))
-print(convert_coded_genotype_to_readable_form('2|1'))
+print(convert_coded_genotype_to_readable_form('0|0')) # AA
+print(convert_coded_genotype_to_readable_form('0|1')) # Aa
+print(convert_coded_genotype_to_readable_form('1|1')) # aa
+print(convert_coded_genotype_to_readable_form('2|0')) # Aa
+print(convert_coded_genotype_to_readable_form('0|2')) # Aa
+print(convert_coded_genotype_to_readable_form('1|2')) # aa
+print(convert_coded_genotype_to_readable_form('2|1')) # aa

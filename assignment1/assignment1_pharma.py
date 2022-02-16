@@ -1,12 +1,13 @@
+from scipy.stats import chisquare
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import math
+
 import argparse
 
-from scipy.stats import chi2_contingency
-
+# helper function that
 def parse_tsv_entry(tsv_line):
     return tsv_line.strip().split("\t")
 
@@ -97,31 +98,27 @@ def count_indel_variants(variants):
             snp_indels_counter += 1
     return snp_indels_counter
 
-def convert_coded_genotype_to_readable_form(genotype):
+def convert_coded_genotype_to_readable_form(genotype):    
     if '|' not in genotype:
         print('error')
         print(genotype)
         return
-    elif genotype == '0|0': #in ['0|0', '0/0']:
+    genotype_frac = genotype.split("|")
+    if genotype_frac.count('0') == len(genotype_frac):
         return 'AA'
-    elif '0' in genotype: #genotype_data[0] == '0' or genotype_data[1] == '0':
+    elif '0' in genotype: # (genotype[0] == '0') or (genotype[1] == 0): #genotype_frac.count(genotype_frac[0]) == len(genotype_frac):
         return 'Aa'
     else:
         return 'aa'
-    #genotype_data = genotype.split("|")
     
-#import scipy.stats as stats
-from scipy.stats import chisquare
-import numpy as np
-import math
 def variant_chi_square_analysis(freq_data, observed_key, expected_key):
     df = pd.DataFrame(freq_data).transpose()
     observed_values = list(freq_data[observed_key].values())
     expected_values = list(freq_data[expected_key].values())
 
-    if 0 in expected_values or 0.0 in expected_values:
-        print(df)
-        return 0, 1
+    #if 0 in expected_values or 0.0 in expected_values:
+    #    print(df)
+    #    return 0, 1
 
     column_sums = list(df.sum(axis=0).values)
     # if any of the columns sums to zero
@@ -134,35 +131,29 @@ def variant_chi_square_analysis(freq_data, observed_key, expected_key):
     res = chisquare(observed_values, f_exp=expected_values)
     chi_square, p_value = res
     if math.isinf(chi_square):
-        p_value = 0.1
+        p_value = 1
     return chi_square, p_value #res[0], res[1]
 
-def count_phenotype_responses_for_variant(variant, phenotype_responses):
-        genotype_freq_table = {
-            'cases' : {'aa': 0, 'Aa': 0, 'AA': 0},
-            'controls': {'aa': 0, 'Aa': 0, 'AA': 0}
-        }
-        for subject in phenotype_responses:
-            allele = convert_coded_genotype_to_readable_form(variant[subject])
-            if phenotype_responses[subject] == '0':
-                genotype_freq_table['cases'][allele] += 1
-            else:
-                genotype_freq_table['controls'][allele] += 1
+def allelic_association_test(genome_freq_table):
+    n10 = genome_freq_table['cases']['aa']
+    n11 = genome_freq_table['cases']['Aa']
+    n12 = genome_freq_table['cases']['AA']
+    n20 = genome_freq_table['controls']['aa']
+    n21 = genome_freq_table['controls']['Aa']
+    n22 = genome_freq_table['controls']['AA']
 
-        variant_with_genotype_freq_table = variant.copy()
-        variant_with_genotype_freq_table['genotype_freq_table'] = genotype_freq_table
-        return variant_with_genotype_freq_table
+    cases_a = (2 * n10) + n11
+    cases_A = n11 + (2 * n12)
+    controls_a = (2 * n20) + n21 
+    controls_A = n21 + (2 * n22)
 
-def record_significant_p_values(variants, id_key, p_value_key, significance, output_filepath):
-    record_entries = []
-    for variant in variants:
-        if variant[p_value_key] < significance:
-            pval = variant[p_value_key]
-            id = variant[id_key]
-            record_entries.append(f'{id} {pval}')
+    genotype_freq_table = {
+        'cases' : {'a': cases_a, 'A': cases_A},
+        'controls': {'a': controls_a, 'A': controls_A}
+    }
 
-    with open(output_filepath, 'w') as f:
-        f.write('\n'.join(record_entries))
+    chi_square, p_value = variant_chi_square_analysis(genotype_freq_table, 'cases', 'controls')
+    return chi_square, p_value
 
 def calculate_hwe(aa, Aa, AA):
     total = aa + Aa + AA
@@ -183,10 +174,39 @@ def calculate_hwe(aa, Aa, AA):
     }
 
     chi_square, p_value = variant_chi_square_analysis(genotype_freq_table, 'observed', 'expected')
-    print(chi_square, p_value)
+    return chi_square, p_value
+
+def count_phenotype_responses_for_variant(variant, phenotype_responses):
+        genotype_freq_table = {
+            'cases' : {'aa': 0, 'Aa': 0, 'AA': 0},
+            'controls': {'aa': 0, 'Aa': 0, 'AA': 0}
+        }
+        for subject in phenotype_responses:
+            allele = convert_coded_genotype_to_readable_form(variant[subject])
+            if phenotype_responses[subject] == '1':
+                genotype_freq_table['cases'][allele] += 1
+            else:
+                genotype_freq_table['controls'][allele] += 1
+
+        variant_with_genotype_freq_table = variant.copy()
+        variant_with_genotype_freq_table['genotype_freq_table'] = genotype_freq_table
+        return variant_with_genotype_freq_table
+
+def record_significant_p_values(variants, id_key, p_value_key, hwe_p_value_key, significance, output_filepath):
+    record_entries = []
+    record_entries.append(f'VAR_ID P_VALUE HWE_P_VALUE')
+    for variant in variants:
+        if variant[p_value_key] < significance:
+            p_val = variant[p_value_key]
+            hwe_p_value = variant[hwe_p_value_key]
+            id = variant[id_key]
+            record_entries.append(f'{id} {p_val} {hwe_p_value}')
+
+    with open(output_filepath, 'w') as f:
+        f.write('\n'.join(record_entries))
 
 def generate_manhattan_plot(
-        data, chromosome_key, p_value_key, export_path = None, significance = 6,
+        data, chromosome_key, p_value_key, export_path = None, significance = 5e-8,
         colors = ['#E24E42', '#008F95'], refSNP = False
     ):
 
@@ -231,19 +251,34 @@ def evaluate_variant_phenotype_significance(variants, phenotype_responses):
     for variant in variants:
         snp_phenotype_frequencies = count_phenotype_responses_for_variant(variant, phenotype_responses)
         chi_square, p_value = variant_chi_square_analysis(snp_phenotype_frequencies['genotype_freq_table'], 'cases', 'controls')
-        print(chi_square, p_value)
+
+        gft = snp_phenotype_frequencies['genotype_freq_table']['controls']
+
+        hwe_chi_square, hwe_p_value = calculate_hwe(gft['aa'], gft['Aa'], gft['AA'])
+
         snp_phenotype_p_value = snp_phenotype_frequencies.copy()
         del snp_phenotype_p_value['genotype_freq_table']
         snp_phenotype_p_value['p_value'] = p_value
+        snp_phenotype_p_value['hwe_p_value'] = hwe_p_value
         snp_phenotype_p_values.append(snp_phenotype_p_value)
 
     chromosome_key = 'CHROM'
     p_value_key = 'p_value'
+    hwe_p_value_key = "hwe_p_value"
     statistical_significance_threshold = 5e-8
+
+    hwe_sig = 0
+    for p_value_stats in snp_phenotype_p_values:
+        if p_value_stats['hwe_p_value'] <= statistical_significance_threshold:
+            hwe_sig += 1
+
+    print(f'hwe: {hwe_sig}')
+
     record_significant_p_values(
         snp_phenotype_p_values,
         chromosome_key,
         p_value_key,
+        hwe_p_value_key,
         statistical_significance_threshold,
         "significant_variants.txt"
     )
@@ -259,7 +294,6 @@ def evaluate_variant_phenotype_significance(variants, phenotype_responses):
 
 if __name__ == '__main__':
 
-    #calculate_hwe(200, 400, 400)
     #parser = argparse.ArgumentParser(description='Genotype Analysis')
     #parser.add_argument('--phen_responses', dest='phen',
     #                help='a two column (no header) text file containing phenotype responses')
