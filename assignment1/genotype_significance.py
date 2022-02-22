@@ -22,7 +22,6 @@ def parse_tsv_entry(tsv_line):
 # input: list of variants. Each variant is in the form of a dictionary
 #        where the column matches the column in the VCF file
 # output: (int) count of variants (length of array)
-
 def read_phenotype_responses_from_file(phenotype_filepath):
     phenotype_responses = {}
     try:
@@ -38,13 +37,15 @@ def read_phenotype_responses_from_file(phenotype_filepath):
                     return
         return phenotype_responses
     except:
+        # if there is an error reading the file or the file does not exist
+        # print an error and exit the program
         print(f'Error reading or locating file {phenotype_filepath}')
+        print(f'Make sure that file exists, the file can be read, and the file is in the desired format')
         sys.exit()
 
-# input: list of variants. Each variant is in the form of a dictionary
-#        where the column matches the column in the VCF file
-# output: (int) count of variants (length of array)
-
+# input: string of key value pairs such that each set of key value pair is separated by a semi colon ';'
+#        and the actual key value pair is separated by the assignment operator '='
+# output: dictionary of the parsed information string
 def extract_vcf_entry_info(unparsed_info):
     info_dict = {}
     info_data = unparsed_info.split(";")
@@ -55,10 +56,11 @@ def extract_vcf_entry_info(unparsed_info):
         except:
             pass
     return info_dict
-# input: list of variants. Each variant is in the form of a dictionary
-#        where the column matches the column in the VCF file
-# output: (int) count of variants (length of array)
 
+# input: vcf filepath (string)
+# output: array of dictionaries. Each dictionary is a vcf entry such that
+# the key is the VCF column header and the value is the corresponding value.
+# The exception to this rule is the INFO column that contains an embedded dictionary
 def extract_vcf_entries(vcf_filepath):
     vcf_header = None
     vcf_entries = []
@@ -84,7 +86,10 @@ def extract_vcf_entries(vcf_filepath):
             vcf_data.append(vcf_entry_dict)
         return vcf_data
     except:
+        # if there is an error reading the file or the file does not exist
+        # print an error and exit the program
         print(f'Error reading or locating file {vcf_filepath}')
+        print(f'Make sure that file exists, the file can be read, and the file is in the desired format')
         sys.exit()
 
 
@@ -116,6 +121,32 @@ def count_multiple_alternate_alleles(variants):
         elif int(variant_info['AC']) > 1:
             ac_counter += 1
     return ac_counter
+
+def count_deletion_indels(variants):
+    deletion_counter = 0
+    for variant in variants:
+        # if the variant is an indel, increase the counter by one
+        if variant['INFO']['VT'] == 'INDEL':
+            if ('AA' in variant['INFO']) and ('deletion' in (variant['INFO']['AA'].lower())):
+                deletion_counter += 1
+    return deletion_counter
+
+def count_multiple_alternate_alleles(variants):
+    ac_counter = 0
+    for variant in variants:
+        # alternate allele counts exists within INFO column
+        variant_info = variant['INFO']
+        # two numbers might exist for the alternate allele count
+        # in the format of #,#
+        # check to see if the first number (the alternate allele count) is greater then one 
+        if int(variant_info['AC'].split(",")[0]) > 1:
+            ac_counter += 1
+        # only a single number exists for the AC value
+        # check if alternate allele count is greater then one
+        elif int(variant_info['AC']) > 1:
+            ac_counter += 1
+    return ac_counter
+
 
 # input: list of variants. Each variant is in the form of a dictionary
 #        where the column matches the column in the VCF file
@@ -151,6 +182,8 @@ def count_indel_variants(variants):
             snp_indels_counter += 1
     return snp_indels_counter
 
+# input: list of variants with p values and the statistical significance threshold
+# output: (int) the number of HWE significant variants
 def count_hwe_significant_variants(snp_phenotype_p_values, statistical_significance_threshold):
     hwe_sig = 0
     for p_value_stats in snp_phenotype_p_values:
@@ -330,11 +363,16 @@ def generate_manhattan_plot(
 def evaluate_variant_phenotype_significance(variants, phenotype_responses):
 
     # calculate statistics for Question 1
-    count_multiple_alternate_alleles(variants)
-    count_passing_variants(variants)
-    count_snp_variants(variants)
-    count_indel_variants(variants)
-
+    alt_alleles = count_multiple_alternate_alleles(variants)
+    print(f'The number of variants with >1 alt alleles: {alt_alleles}')
+    passing_alleles = count_passing_variants(variants)
+    print(f'The number of variants that passed all filters: {passing_alleles}')
+    snps_count = count_snp_variants(variants)
+    print(f'The number of variants that are SNPs: {snps_count}')
+    indels_count = count_indel_variants(variants)
+    print(f'The number of variants that are INDELs: {indels_count}')
+    deletions_count = count_deletion_indels(variants)
+    print(f'The number of variants that are deletions (subset of INDELS): {deletions_count}')
     
     snp_phenotype_p_values = []
     
@@ -360,7 +398,7 @@ def evaluate_variant_phenotype_significance(variants, phenotype_responses):
     statistical_significance_threshold = 5e-8
 
     hwe_significant_variants_count = count_hwe_significant_variants(snp_phenotype_p_value, statistical_significance_threshold)
-    print(f'hwe significant variant count: {hwe_significant_variants_count}')
+    print(f'The number of variants that are HWE significant are: {hwe_significant_variants_count}')
 
     record_significant_p_values(
         snp_phenotype_p_values,
